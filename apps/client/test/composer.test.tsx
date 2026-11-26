@@ -83,6 +83,39 @@ test("a pasted file is a block where the caret is, kept with its chat, sent as a
   expect(screen(app)).toContain('sent ["alpha","see  please","queue",[');
 });
 
+test("a file pasted between words is sent with the place it stood at", async () => {
+  const app = await fixture();
+  await app.type(input, "before ");
+  await app.paste(input, { files: ["test/fixtures/pixel.png"] });
+  await app.waitFor("label:View picture pixel.png · 0.0 KB");
+  await app.type(input, " between ");
+  await app.paste(input, { files: ["test/paste-pixel.bmp"] });
+  await app.waitFor("label:View picture paste-pixel.png · 0.0 KB");
+  await app.type(input, " after");
+  await app.keyboard.press("enter");
+  await app.waitFor(
+    `text:anchors ${JSON.stringify([
+      ["pixel.png", 7],
+      ["paste-pixel.png", 16],
+    ])}`,
+  );
+  expect(screen(app)).toContain('sent ["alpha","before  between  after"');
+});
+
+test("a failed send with pictures puts them back where they stood", async () => {
+  const app = await fixture();
+  await app.type(input, "retry ");
+  await app.paste(input, { files: ["test/fixtures/pixel.png"] });
+  await app.waitFor("label:View picture pixel.png · 0.0 KB");
+  await app.type(input, " now");
+  await app.keyboard.press("enter");
+  await app.waitFor("label:Edit");
+  await app.press("label:Edit");
+  // The box has "retry ", the picture, " now" again, in that order.
+  await app.keyboard.press("enter");
+  await app.waitFor(`text:anchors ${JSON.stringify([["pixel.png", 6]])}`);
+});
+
 test("files a file manager copied or dropped are read from their file: URLs and sent", async () => {
   const app = await fixture();
   // The test's own directory, as a file manager names it (`import.meta.url` is `asset:` here).

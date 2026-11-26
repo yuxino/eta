@@ -43,6 +43,7 @@ function Fixture() {
   const resultBlocks = signal("");
   const uploadNames = new Map<string, string>();
   const resultFiles = signal("");
+  const resultAnchors = signal("");
   const quote = signal<{ conversationId: string; text: string }>();
   Object.assign(host, {
     agent: (id: string) => ({ id, name: id }),
@@ -86,6 +87,15 @@ function Fixture() {
           throw new Error("delivery failed");
         }
         resultBlocks.set(JSON.stringify(args.blocks));
+        resultAnchors.set(
+          args.anchors
+            ? `anchors ${JSON.stringify(
+                (args.anchors as { attachmentId: string; at: number }[]).map(
+                  (anchor) => [uploadNames.get(anchor.attachmentId), anchor.at],
+                ),
+              )}`
+            : "",
+        );
         const sentFiles = (args.attachments as string[] | undefined) ?? [];
         resultFiles.set(
           sentFiles.length
@@ -174,6 +184,7 @@ function Fixture() {
         <Text>{result()}</Text>
         <Text>{resultBlocks()}</Text>
         <Text>{resultFiles()}</Text>
+        <Text>{resultAnchors()}</Text>
         <NotificationHost />
       </View>
     </Host.Provider>

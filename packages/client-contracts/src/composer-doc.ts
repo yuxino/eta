@@ -3,9 +3,15 @@
 // blocks among it — a folded paste, a file, a mention. Everything here is plain data, so the
 // rules can be tested without an editor; the client's plugins only call them.
 
-import type { Draft, DraftPart, PasteRange } from "./composer-draft";
+import type {
+  AttachmentAnchor,
+  Draft,
+  DraftPart,
+  PasteRange,
+} from "./composer-draft";
 import type { AttachmentView } from "./product";
 import {
+  anchorsOf,
   charCount,
   draftFiles,
   draftWithBlocks,
@@ -147,6 +153,8 @@ export type UploadState =
 export interface SerializedDraft {
   text: string;
   blocks: PasteRange[];
+  /** Where each attachment block stood in `text`, in document order. */
+  anchors: AttachmentAnchor[];
   /** Mentioned member ids, in the order they appear, without repeats. */
   mentions: string[];
   /** Attachment block ids, in document order. */
@@ -280,18 +288,45 @@ export function textToNodes(text: string): DocNode[] {
 
 /**
  * A sent message back as a draft (a failed send pulled back to edit): its pastes folded again from
- * their ranges, its attachments as file parts after the text.
+ * their ranges, its attachments as file parts where its `anchors` put them and, for any without
+ * an anchor, after the text.
  */
 export function sentToDraft(message: {
   text: string;
   blocks?: readonly PasteRange[];
+  anchors?: readonly AttachmentAnchor[];
   attachments: readonly AttachmentView[];
 }): Draft {
+  const filePart = (file: AttachmentView): DraftPart => ({
+    type: "file",
+    id: file.id,
+    name: file.name,
+    contentType: file.contentType,
+    size: file.size,
+  });
+  const anchored = anchorsOf(
+    { anchors: message.anchors, attachments: message.attachments },
+    message.text,
+  )
+    .map((anchor, order) => ({ ...anchor, order }))
+    .sort((a, b) => a.at - b.at || a.order - b.order);
   const parts: DraftPart[] = [];
   let end = 0;
+  /** Text up to `to`, with the files anchored on the way. */
+  const textTo = (to: number) => {
+    while (anchored.length && anchored[0]!.at <= to) {
+      const { attachmentId, at } = anchored.shift()!;
+      parts.push({ type: "text", text: message.text.slice(end, at) });
+      end = Math.max(end, at);
+      const file = message.attachments.find((item) => item.id === attachmentId);
+      if (file) parts.push(filePart(file));
+    }
+    parts.push({ type: "text", text: message.text.slice(end, to) });
+    end = to;
+  };
   for (const [start, stop] of message.blocks ?? []) {
     if (start < end || stop > message.text.length) continue;
-    parts.push({ type: "text", text: message.text.slice(end, start) });
+    textTo(start);
     parts.push({
       type: "paste",
       id: `paste-${start}`,
@@ -299,15 +334,12 @@ export function sentToDraft(message: {
     });
     end = stop;
   }
-  parts.push({ type: "text", text: message.text.slice(end) });
+  textTo(message.text.length);
+  const placed = new Set(
+    parts.flatMap((part) => (part.type === "file" ? [part.id] : [])),
+  );
   for (const file of message.attachments)
-    parts.push({
-      type: "file",
-      id: file.id,
-      name: file.name,
-      contentType: file.contentType,
-      size: file.size,
-    });
+    if (!placed.has(file.id)) parts.push(filePart(file));
   return merged(parts);
 }
 
